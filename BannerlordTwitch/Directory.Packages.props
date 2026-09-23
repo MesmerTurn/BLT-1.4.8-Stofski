@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Bannerlord.ReferenceAssemblies" Version="1.4.7.117484" />
+    <PackageVersion Include="Bannerlord.ReferenceAssemblies.NavalDLC" Version="1.4.7.117484" />
+  </ItemGroup>
+</Project>
