@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using BannerlordTwitch.Helpers;
@@ -7,6 +7,7 @@ using HarmonyLib;
 using TaleWorlds.CampaignSystem;
 using TaleWorlds.CampaignSystem.AgentOrigins;
 using TaleWorlds.CampaignSystem.Party;
+using TaleWorlds.CampaignSystem.Roster;
 using TaleWorlds.Core;
 using TaleWorlds.Localization;
 using TaleWorlds.MountAndBlade;
@@ -330,10 +331,38 @@ namespace BLTAdoptAHero
                 {
                     foreach (var r in h.Retinue.Where(r => r.State != AgentState.Killed))
                     {
-                        h.Party?.MemberRoster?.AddToCounts(r.Troop, -1);
+                        RemoveOne(h.Party?.MemberRoster, r.Troop);
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// Takes one of a troop back out of a roster, and only if it is actually in there.
+        ///
+        /// This used to be AddToCounts(troop, -1) with no check. Subtracting a troop the party no
+        /// longer has drives that entry's count negative, and a TroopRoster with a negative count
+        /// is quietly corrupt: its own index tables stop matching what it holds. The damage shows
+        /// up later in whatever touches that roster next - as a crash in the party morale
+        /// calculation, or as the game locking up while its spawn logic walks the same broken
+        /// roster round and round. Reported as freezes in battles with more than one BLT party.
+        /// </summary>
+        private static void RemoveOne(TroopRoster roster, CharacterObject troop)
+        {
+            if (roster == null || troop == null) return;
+
+            try
+            {
+                int index = roster.FindIndexOfTroop(troop);
+                if (index < 0) return;
+                if (roster.GetElementNumber(index) <= 0) return;
+
+                roster.AddToCounts(troop, -1);
+            }
+            catch (Exception ex)
+            {
+                Log.Exception($"{nameof(BLTSummonBehavior)}.{nameof(RemoveOne)}", ex);
+            }
         }
 
         private static void SpawnRetinue(Hero adoptedHero, bool ownerIsMounted, FormationClass ownerFormationClass,
