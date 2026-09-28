@@ -246,15 +246,17 @@ namespace BLTAdoptAHero
 
         public override void OnMissionTick(float dt)
         {
-            SafeCall(() =>
+            // One SafeCall per action, not one around the whole loop. The list is cleared before
+            // any of them run, so with a single wrapper the first one to throw took every action
+            // still queued behind it down with it - already dropped, never retried, no trace of
+            // them anywhere. With two viewers summoning into the same battle that is exactly one
+            // hero spawning and the other silently vanishing.
+            var actionsToDo = onTickActions.ToList();
+            onTickActions.Clear();
+            foreach (var action in actionsToDo)
             {
-                var actionsToDo = onTickActions.ToList();
-                onTickActions.Clear();
-                foreach (var action in actionsToDo)
-                {
-                    action();
-                }
-            });
+                SafeCall(action);
+            }
             SafeCall(() => UpdateFocusTargets());
         }
 
@@ -394,6 +396,11 @@ namespace BLTAdoptAHero
                 var retinueAgent = SpawnAgent(onPlayerSide, retinueTroop, existingHero.Party,
                     retinueTroop.IsMounted && retinueMounted, false, !DeploymentFlag);
 
+                // A retinue member the mission would not take is simply not there - recording them
+                // anyway would leave a retinue entry with no agent, and the next thing to walk that
+                // list would fall over on it.
+                if (retinueAgent == null) continue;
+
                 existingHero.Retinue.Add(new()
                 {
                     Troop = retinueTroop,
@@ -447,6 +454,8 @@ namespace BLTAdoptAHero
                 var retinue2Agent = SpawnAgent(onPlayerSide, retinue2Troop, existingHero.Party,
                     retinue2Troop.IsMounted && retinueMounted, false, !DeploymentFlag);
 
+                if (retinue2Agent == null) continue;
+
                 existingHero.Retinue.Add(new()
                 {
                     Troop = retinue2Troop,
@@ -483,9 +492,39 @@ namespace BLTAdoptAHero
             }
         }
 
+        /// <summary>
+        /// Spawns one troop into the current mission, or returns null when the mission is not in a
+        /// state that can take one.
+        ///
+        /// Ghost's log has this throwing a NullReferenceException from inside the engine's
+        /// SpawnTroop, reached from OnMissionTick. Nothing here checked anything first: a null
+        /// party or troop goes straight into PartyAgentOrigin, and asking for a troop with a
+        /// formation before the mission has built its teams gives the engine nothing to put the
+        /// agent in. Failing here also leaves the engine's own spawn bookkeeping half done, which
+        /// matters during the loading screen, when it is counting the agents it still expects.
+        /// </summary>
         public static Agent SpawnAgent(bool onPlayerSide, CharacterObject troop, PartyBase party, bool spawnWithHorse, bool isReinforcement = false, bool isAlarmed = true)
         {
-            var agent = Mission.Current.SpawnTroop(
+            var mission = Mission.Current;
+            if (mission == null || troop == null || party == null)
+            {
+                Log.Error($"[Summon] Refusing to spawn {troop?.Name?.ToString() ?? "(no troop)"}: "
+                          + $"mission {(mission == null ? "missing" : "ok")}, "
+                          + $"party {(party == null ? "missing" : "ok")}");
+                return null;
+            }
+
+            // A formation needs a team to live in. Before the mission has built its teams there is
+            // none, and the engine dereferences it regardless.
+            var team = onPlayerSide ? mission.PlayerTeam : mission.PlayerEnemyTeam;
+            if (team == null || mission.Teams == null || mission.Teams.Count == 0)
+            {
+                Log.Error($"[Summon] Refusing to spawn {troop.Name}: the mission has no "
+                          + $"{(onPlayerSide ? "player" : "enemy")} team yet");
+                return null;
+            }
+
+            var agent = mission.SpawnTroop(
                 new PartyAgentOrigin(party, troop)
                 , isPlayerSide: onPlayerSide
                 , hasFormation: true
@@ -498,6 +537,12 @@ namespace BLTAdoptAHero
                 , initialPosition: null
                 , initialDirection: null
             );
+            if (agent == null)
+            {
+                Log.Error($"[Summon] The engine returned no agent for {troop.Name}");
+                return null;
+            }
+
             agent.MountAgent?.FadeIn();
             agent.FadeIn();
             return agent;

@@ -278,8 +278,17 @@ namespace BLTAdoptAHero
             }
 
             // SpawnAgent (as called by this function) crashes if called in MissionMode.Deployment (would be nice to make it work though)
-            if (Mission.Current == null
-                || Mission.Current.Mode is MissionMode.Barter or MissionMode.Conversation or
+            // Mission.Current == null satisfies the outer test, and the inner one then read
+            // Mission.Current.Mode anyway - so !summon with no mission running threw a
+            // NullReferenceException and BLT declared the game unstable. It is in Ghost's log
+            // four times. With no mission there is simply nothing to be summoned into.
+            if (Mission.Current == null)
+            {
+                onFailure("{=TdykIizS}You cannot be summoned now!".Translate());
+                return;
+            }
+
+            if (Mission.Current.Mode is MissionMode.Barter or MissionMode.Conversation or
                     MissionMode.Duel or MissionMode.Replay or MissionMode.CutScene or MissionMode.Stealth)
             {
                 if (Mission.Current.Mode is MissionMode.Stealth && MissionHelpers.InHideOutMission())
@@ -732,8 +741,16 @@ namespace BLTAdoptAHero
             }
 
             bool DeploymentFlag = Mission.Current.Mode is MissionMode.Deployment;
-            BLTSummonBehavior.SpawnAgent(settings.OnPlayerSide, adoptedHero.CharacterObject, heroSummonState.Party,
+            var spawnedAgent = BLTSummonBehavior.SpawnAgent(settings.OnPlayerSide, adoptedHero.CharacterObject, heroSummonState.Party,
                 adoptedHero.CharacterObject.IsMounted && BLTSummonBehavior.ShouldBeMounted(formationClass), false, !DeploymentFlag);
+
+            // If the mission could not take the agent, stop here rather than carrying on as though
+            // the hero were in the battle - the viewer keeps their gold and gets told plainly.
+            if (spawnedAgent == null)
+            {
+                onFailure("{=TdykIizS}You cannot be summoned now!".Translate());
+                return;
+            }
 
             // Some random stuff that is required to ensure caches are updated
             foreach (var t in Mission.Current.Teams)
